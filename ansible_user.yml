@@ -1,0 +1,15 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: add ansible user
+      user:
+        name: ansible
+        groups: sudo
+        shell: /bin/bash
+        append: yes
+    - name: Set authorized key for user ansible copying it from current user
+      ansible.posix.authorized_key:
+        user: ansible
+        state: present
+        key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_rsa.pub') }}"
