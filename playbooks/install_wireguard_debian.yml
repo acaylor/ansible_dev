@@ -1,0 +1,50 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Debian 10
+      block:
+        - name: enable backports repo on Debian 10
+          apt_repository:
+            repo: "deb http://deb.debian.org/debian buster-backports main"
+            state: present
+            update_cache: yes
+        - name: install kernel headers
+          apt:
+            name: "linux-headers-{{ ansible_kernel }}"
+            state: present
+        - name: Get architecture variable
+          command: dpkg --print-architecture
+          register: arch_var
+          changed_when: false
+        - name: Install kernel headers for architecture
+          apt:
+            name: "linux-headers-{{ arch_var.stdout }}"
+            state: present
+        - name: Install Wireguard package
+          apt:
+            name: wireguard
+            state: present
+      when: (ansible_distribution == "Debian" and ansible_distribution_major_version == 10)
+    - name: Configure Wireguard
+      block:
+        - name: Enable wireguard kernel module
+          modprobe:
+            name: wireguard
+            state: present
+          register: wireguard_mod
+          until: wireguard_mod is succeeded
+          retries: 10
+          delay: 10
+          failed_when: wireguard_mod is failure
+        - name: Add wireguard network interface
+          command: 
+            cmd: ip link add dev wg0 type wireguard
+            creates: /etc/.wireguardconfigured
+        - name: Define wireguard subnet
+          command:
+            cmd: ip address add dev wg0 192.168.99.1/24
+            creates: /etc/.wireguardconfigured
+        - name: generate wireguard key
+          shell:
+            cmd: umask 077 && wg genkey > /

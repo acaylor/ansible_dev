@@ -1,3 +1,3 @@
 # Ansible Development
 
-My personal ansible repo
+Single use playbooks. Roles should have dedicated repos.

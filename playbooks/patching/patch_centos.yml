@@ -1,0 +1,35 @@
+---
+# @TODO refactor for centos stream support
+- hosts: CentOS
+  become: yes
+  pre_tasks:
+  - name: OS Check
+    debug:
+      msg: System {{ inventory_hostname }} not supported
+      verbosity: 1
+    when: ansible_facts['distribution'] != "CentOS"
+
+  - name: Check for yum-utils
+    yum:
+      name: 'yum-utils'
+      state: present
+    when: ansible_facts['distribution_major_version'] == "7"
+
+  tasks:
+    - name: yum - Upgrade everything
+      yum:
+        name: "*"
+        state: latest
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: check needs-restarting - el7
+      command: 'needs-restarting -r'
+      failed_when: false
+      register: needs_restarting
+      changed_when: needs_restarting.rc == 1
+      notify: restart
+      when: ansible_facts['distribution_major_version'] == "7"
+
+  handlers:
+    - name: restart
+      reboot:
