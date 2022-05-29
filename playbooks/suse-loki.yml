@@ -1,0 +1,25 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: "Add logging repo to {{ ansible_hostname }}"
+      community.general.zypper_repository:
+      repo: 'https://download.opensuse.org/repositories/security:/logging/openSUSE_Leap_15.3/security:logging.repo'
+      auto_import_keys: yes
+    - name: "Add loki packages"
+      community.general.zypper:
+      name:
+        - loki
+        - promtail
+      state: present
+      update_cache: yes
+    - name: "Start loki services"
+      systemd:
+        name: loki
+        status: started
+        enabled: yes
+    - name: "Start promtail service"
+      systemd:
+        name: promtail
+        status: started
+        enabled: yes
