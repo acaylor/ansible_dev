@@ -1,46 +1,86 @@
 ---
-- hosts: all
-  become: yes
-  pre_tasks:
-  - name: OS Check
-    debug:
-      msg: System {{ inventory_hostname }} not supported
-      verbosity: 1
-    when: (ansible_facts['os_family'] != "RedHat") or (ansible_facts['os_family'] != "Debian")
+# Consolidated OS patching playbook.
+# Supports the RedHat family (RHEL / Rocky / AlmaLinux / CentOS Stream 8, 9, 10),
+# the Debian family (Debian / Ubuntu) and the SUSE family (openSUSE Leap /
+# Tumbleweed / SLES). Upgrades all packages and reboots only when the host
+# reports a reboot is required.
+- name: Patch Linux hosts
+  hosts: all
+  become: true
 
-  - name: Check for yum-utils
-    yum:
-      name: 'yum-utils'
-      state: present
-    when: (ansible_facts['os_family'] == "RedHat" and ansible_facts['distribution'] == "7")
+  pre_tasks:
+    - name: Fail on unsupported OS family
+      ansible.builtin.fail:
+        msg: "{{ inventory_hostname }} ({{ ansible_facts['os_family'] }}) is not supported by this playbook"
+      when: ansible_facts['os_family'] not in ["RedHat", "Debian", "Suse"]
+
+    - name: Ensure dnf-utils is present (needs-restarting) - RedHat family
+      ansible.builtin.dnf:
+        name: dnf-utils
+        state: present
+      when: ansible_facts['os_family'] == "RedHat"
 
   tasks:
-  - name: apt - Upgrade everything
-    apt:
-      update_cache: yes
-      upgrade: yes
-    when: ansible_facts['os_family'] == "Debian"
-  - name: yum - Upgrade everything
-    yum:
-      name: "*"
-      state: latest
-    when: ansible_facts['os_family'] == "RedHat"
+    - name: Upgrade all packages - Debian family
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        autoremove: true
+      when: ansible_facts['os_family'] == "Debian"
 
-  - name: check needs-restarting - el7
-    command: 'needs-restarting -r'
-    failed_when: false
-    register: needs_restarting
-    changed_when: needs_restarting.rc == 1
-    notify: restart
-    when: (ansible_facts['os_family'] != "RedHat" and ansible_facts['distribution'] == "7")
-  - name: check reboot required - Ubuntu
-    shell: "[ -f /var/run/reboot-required ]"
-    failed_when: false
-    register: reboot_required
-    changed_when: reboot_required.rc == 0
-    notify: restart
-    when: (ansible_facts['distribution'] == "Ubuntu")
+    - name: Upgrade all packages - RedHat family
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Distribution upgrade (zypper dup) - openSUSE Tumbleweed
+      community.general.zypper:
+        name: "*"
+        state: dist-upgrade
+        update_cache: true
+      when: ansible_facts['distribution'] == "openSUSE Tumbleweed"
+
+    - name: Upgrade all packages - SUSE family (Leap / SLES)
+      community.general.zypper:
+        name: "*"
+        state: latest
+        update_cache: true
+      when:
+        - ansible_facts['os_family'] == "Suse"
+        - ansible_facts['distribution'] != "openSUSE Tumbleweed"
+
+    - name: Check if a reboot is required - RedHat family
+      ansible.builtin.command: needs-restarting -r
+      register: needs_restarting
+      failed_when: false
+      changed_when: needs_restarting.rc == 1
+      notify: Reboot host
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Check if a reboot is required - SUSE family
+      ansible.builtin.command: zypper needs-rebooting
+      register: zypper_needs_rebooting
+      failed_when: zypper_needs_rebooting.rc not in [0, 102]
+      changed_when: zypper_needs_rebooting.rc == 102
+      notify: Reboot host
+      when: ansible_facts['os_family'] == "Suse"
+
+    - name: Check if a reboot is required - Debian family
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Trigger reboot - Debian family
+      ansible.builtin.debug:
+        msg: Reboot required
+      changed_when: true
+      notify: Reboot host
+      when:
+        - ansible_facts['os_family'] == "Debian"
+        - reboot_required.stat.exists | default(false)
 
   handlers:
-  - name: restart
-    reboot:
+    - name: Reboot host
+      ansible.builtin.reboot:

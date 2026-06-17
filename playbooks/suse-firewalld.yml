@@ -1,0 +1,18 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: "Install firewalld on {{ ansible_hostname }}"
+      zypper:
+        name: firewalld
+        state: present
+    - name: "Enable firewalld"
+      systemd:
+        name: firewalld
+        state: started
+        enabled: yes
+    - name: "Allow https in default firewalld zone"
+      ansible.posix.firewalld:
+        service: https
+        permanent: yes
+        state: enabled
